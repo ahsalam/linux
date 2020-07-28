@@ -110,6 +110,7 @@ int seg6_do_srh_encap(struct sk_buff *skb, struct ipv6_sr_hdr *osrh, int proto)
 	struct dst_entry *dst = skb_dst(skb);
 	struct net *net = dev_net(dst->dev);
 	struct ipv6hdr *hdr, *inner_hdr;
+	struct iphdr *inner_ipv4_hdr;
 	struct ipv6_sr_hdr *isrh;
 	int hdrlen, tot_len, err;
 	__be32 flowlabel;
@@ -121,7 +122,11 @@ int seg6_do_srh_encap(struct sk_buff *skb, struct ipv6_sr_hdr *osrh, int proto)
 	if (unlikely(err))
 		return err;
 
-	inner_hdr = ipv6_hdr(skb);
+	if (skb->protocol == htons(ETH_P_IPV6))
+		inner_hdr = ipv6_hdr(skb);
+	else
+		inner_ipv4_hdr = ip_hdr(skb);
+
 	flowlabel = seg6_make_flowlabel(net, skb, inner_hdr);
 
 	skb_push(skb, tot_len);
@@ -138,6 +143,10 @@ int seg6_do_srh_encap(struct sk_buff *skb, struct ipv6_sr_hdr *osrh, int proto)
 		ip6_flow_hdr(hdr, ip6_tclass(ip6_flowinfo(inner_hdr)),
 			     flowlabel);
 		hdr->hop_limit = inner_hdr->hop_limit;
+	} else if (skb->protocol == htons(ETH_P_IP)) {
+		ip6_flow_hdr(hdr, inner_ipv4_hdr->tos, flowlabel);
+		hdr->hop_limit = inner_ipv4_hdr->ttl;
+		memset(IP6CB(skb), 0, sizeof(*IP6CB(skb)));
 	} else {
 		ip6_flow_hdr(hdr, 0, flowlabel);
 		hdr->hop_limit = ip6_dst_hoplimit(skb_dst(skb));
